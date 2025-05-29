@@ -1,0 +1,64 @@
+from flask import Flask, request, jsonify
+from datetime import datetime
+import swisseph as swe
+import pytz
+
+app = Flask(__name__)
+
+# Set the path to the ephemeris data (you can download it separately, but for now we use the default)
+swe.set_ephe_path(None)
+
+@app.route('/kundli', methods=['POST'])
+def generate_kundli():
+    data = request.get_json()
+    
+    # Extract birth details
+    dob = data['dob']  # Format: "YYYY-MM-DD"
+    time = data['time'] # Format: "HH:MM"
+    place = data['place'] # Format: "City, Country"
+    
+    # Convert dob and time to datetime object
+    birth_datetime = datetime.strptime(f"{dob} {time}", "%Y-%m-%d %H:%M")
+    
+    # For simplicity, we assume the place is in India (you can extend this with geocoding)
+    # Using New Delhi as default
+    lat = 28.6139
+    lng = 77.2090
+    tz = pytz.timezone('Asia/Kolkata')
+    
+    # Convert to UTC
+    local_birth = tz.localize(birth_datetime)
+    utc_birth = local_birth.astimezone(pytz.utc)
+    
+    # Julian day for the birth time
+    jd = swe.julday(utc_birth.year, utc_birth.month, utc_birth.day, utc_birth.hour + utc_birth.minute/60.0)
+    
+    # Calculate the positions of the planets
+    planets = {
+        'sun': swe.SUN,
+        'moon': swe.MOON,
+        'mercury': swe.MERCURY,
+        'venus': swe.VENUS,
+        'mars': swe.MARS,
+        'jupiter': swe.JUPITER,
+        'saturn': swe.SATURN,
+        'rahu': swe.MEAN_NODE,
+        'ketu': swe.MEAN_NODE  # Note: Ketu is the south node, we'll calculate below
+    }
+    
+    results = {}
+    for name, planet in planets.items():
+        # For Rahu and Ketu, we get the same position from the node, then adjust Ketu
+        if name == 'ketu':
+            # Ketu is always 180 degrees from Rahu
+            pos, _ = swe.calc_ut(jd, planet)
+            results[name] = (pos + 180) % 360
+        else:
+            pos, _ = swe.calc_ut(jd, planet)
+            results[name] = pos
+    
+    # Return the positions
+    return jsonify(results)
+
+if __name__ == '__main__':
+    app.run(debug=True)
